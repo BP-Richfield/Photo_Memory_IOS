@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mein Foto-Memory Pro (Speed Edition)</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+            text-align: center; 
+            background: #f4f4f5; 
+            margin: 0; 
+            padding: 0; 
+            min-height: 100vh;
+            display: flex; 
+            flex-direction: column; 
+            align-items: center;
+            justify-content: center; 
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .menu-bar {
+            background: white;
+            padding: 6px 10px; 
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            margin-bottom: 12px;
+            width: 95%;
+            max-width: 850px;
+            display: flex;
+            flex-direction: row; 
+            flex-wrap: wrap; 
+            gap: 6px; 
+            justify-content: center;
+            align-items: center;
+        }
+        
+        button, .upload-btn, select, input {
+            font-size: 14px; 
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            outline: none;
+            margin: 0;
+            box-sizing: border-box;
+            /* Entfernt die 300ms Klick-Verzögerung auf Knöpfen */
+            touch-action: manipulation;
+        }
+        
+        .upload-btn { background: #007aff; color: white; cursor: pointer; font-weight: bold; border: none; }
+        button { background: #e5e5ea; color: #333; cursor: pointer; font-weight: bold; border: none; }
+        button.primary { background: #34c759; color: white; }
+        input[type="file"] { display: none; }
+        
+        .divider { width: 1px; height: 24px; background: #ddd; margin: 0 4px; }
+        
+        .scoreboard {
+            display: none; 
+            width: 82vmin;
+            max-width: 750px;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .score-box {
+            background: white;
+            padding: 6px 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            color: #999; 
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .score-box.active {
+            color: #000;
+            border-color: #34c759; 
+            background: #eaffea;
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .grid { 
+            display: grid; 
+            grid-template-columns: repeat(4, 1fr); 
+            gap: 10px; 
+            width: 82vmin; 
+            max-width: 750px; 
+        }
+        
+        .card { 
+            aspect-ratio: 1; 
+            background: #007aff; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            overflow: hidden; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2); 
+            
+            /* PERFORMANCE-BOOST: */
+            touch-action: manipulation; /* Keine 300ms Wartezeit mehr beim Tippen! */
+            -webkit-user-select: none; /* Verhindert versehentliches Markieren */
+            user-select: none;
+            will-change: transform; /* Hardware-Beschleunigung durch die GPU */
+            transition: transform 0.15s ease-out; /* Schnellere, knackigere Animation */
+        }
+        .card img { width: 100%; height: 100%; object-fit: cover; display: none; pointer-events: none; }
+        .card.flipped img { display: block; }
+        .card.flipped { background: white; transform: scale(0.95); box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
+        .card.matched { opacity: 0.7; transform: scale(0.95); }
+
+        #game-message {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            z-index: 1000;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        #game-message button { margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="menu-bar">
+        <select id="mode-select">
+            <option value="1">1 Spieler</option>
+            <option value="2">2 Spieler</option>
+        </select>
+        
+        <select id="deck-select">
+            <option value="">-- Set wählen --</option>
+        </select>
+        <button onclick="loadSelectedDeck()">Spielen</button>
+        
+        <button id="delete-btn" onclick="deleteSelectedDeck()" style="background:#ff3b30; color:white;">Löschen</button>
+        
+        <button id="restart-btn" class="primary" onclick="restartGame()" style="display: none;">Neustart</button>
+        <button id="end-btn" onclick="endGame()" style="display: none;">Beenden</button>
+        
+        <div class="divider"></div>
+        
+        <input type="text" id="deck-name" placeholder="Neues Set" style="width: 100px;">
+        <label class="upload-btn">
+            + Speichern
+            <input type="file" id="upload" multiple accept="image/*">
+        </label>
+    </div>
+    
+    <div class="scoreboard" id="scoreboard">
+        <div id="score-p1" class="score-box active">Spieler 1: 0</div>
+        <div id="score-p2" class="score-box">Spieler 2: 0</div>
+    </div>
+
+    <div class="grid" id="board"></div>
+
+    <div id="game-message">
+        <span id="game-message-text"></span><br>
+        <button onclick="closeMessage()">OK</button>
+    </div>
+
+    <script>
+        let currentUrls = [];
+        let cards = [];
+        let flipped = [];
+        let matches = 0;
+        let decks = {};
+        
+        let playerMode = 1;
+        let currentPlayer = 1;
+        let scores = {1: 0, 2: 0};
+        
+        let deleteConfirmTimer = null;
+
+        window.onload = () => {
+            loadDecksFromStorage();
+        };
+
+        function showMessage(text) {
+            document.getElementById('game-message-text').innerText = text;
+            document.getElementById('game-message').style.display = 'block';
+        }
+
+        function closeMessage() {
+            document.getElementById('game-message').style.display = 'none';
+        }
+
+        function loadDecksFromStorage() {
+            try {
+                decks = JSON.parse(localStorage.getItem('memoryDecks') || '{}');
+                updateDeckDropdown();
+            } catch (e) {
+                console.error("Fehler beim Laden.");
+            }
+        }
+
+        function saveDecksToStorage() {
+            try {
+                localStorage.setItem('memoryDecks', JSON.stringify(decks));
+                updateDeckDropdown();
+            } catch (e) {
+                showMessage("Speicher voll! Bitte lösche ein altes Set.");
+            }
+        }
+
+        function updateDeckDropdown() {
+            const select = document.getElementById('deck-select');
+            select.innerHTML = '<option value="">-- Set wählen --</option>';
+            for (let name in decks) {
+                let option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                select.appendChild(option);
+            }
+        }
+
+        document.getElementById('upload').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files).slice(0, 8);
+            if (files.length === 0) return;
+            
+            let deckName = document.getElementById('deck-name').value.trim();
+            if (!deckName) {
+                deckName = "Set " + (Object.keys(decks).length + 1);
+                document.getElementById('deck-name').value = deckName;
+            }
+
+            const processedImages = [];
+            for (let file of files) {
+                const dataUrl = await processImage(file);
+                processedImages.push(dataUrl);
+            }
+
+            decks[deckName] = processedImages;
+            saveDecksToStorage();
+            
+            showMessage(`Set "${deckName}" wurde gespeichert!`);
+            document.getElementById('deck-select').value = deckName;
+            loadSelectedDeck();
+        });
+
+        function processImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const size = 300; 
+                        canvas.width = size;
+                        canvas.height = size;
+                        
+                        const minDim = Math.min(img.width, img.height);
+                        const startX = (img.width - minDim) / 2;
+                        const startY = (img.height - minDim) / 2;
+                        
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, startX, startY, minDim, minDim, 0, 0, size, size);
+                        
+                        resolve(canvas.toDataURL('image/jpeg', 0.7));
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function loadSelectedDeck() {
+            const name = document.getElementById('deck-select').value;
+            if (!name) {
+                showMessage("Bitte wähle zuerst ein Set aus!");
+                return;
+            }
+            if (!decks[name]) return;
+            
+            currentUrls = decks[name];
+            startGame();
+        }
+
+        function deleteSelectedDeck() {
+            const name = document.getElementById('deck-select').value;
+            const delBtn = document.getElementById('delete-btn');
+
+            if (!name) {
+                const oldText = delBtn.innerText;
+                delBtn.innerText = "Erst Set wählen!";
+                setTimeout(() => delBtn.innerText = oldText, 2000);
+                return;
+            }
+
+            if (delBtn.dataset.confirm !== "true") {
+                delBtn.dataset.confirm = "true";
+                delBtn.innerText = "Wirklich löschen?";
+                deleteConfirmTimer = setTimeout(() => {
+                    delBtn.dataset.confirm = "false";
+                    delBtn.innerText = "Löschen";
+                }, 3000);
+                return;
+            }
+
+            clearTimeout(deleteConfirmTimer);
+            delBtn.dataset.confirm = "false";
+            delBtn.innerText = "Löschen";
+
+            delete decks[name];
+            saveDecksToStorage();
+            endGame(); 
+            showMessage(`Set "${name}" wurde gelöscht.`);
+        }
+
+        function endGame() {
+            document.getElementById('board').innerHTML = '';
+            document.getElementById('scoreboard').style.display = 'none';
+            document.getElementById('restart-btn').style.display = 'none';
+            document.getElementById('end-btn').style.display = 'none';
+            currentUrls = [];
+        }
+
+        function restartGame() {
+            if (currentUrls.length > 0) startGame();
+        }
+
+        function startGame() {
+            playerMode = parseInt(document.getElementById('mode-select').value);
+            currentPlayer = 1;
+            scores = {1: 0, 2: 0};
+            
+            updateScoreBoard();
+            
+            const pairs = [...currentUrls, ...currentUrls].sort(() => Math.random() - 0.5);
+            
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            cards = [];
+            matches = 0;
+            flipped = [];
+
+            document.getElementById('restart-btn').style.display = 'inline-block';
+            document.getElementById('end-btn').style.display = 'inline-block';
+            document.getElementById('scoreboard').style.display = 'flex'; 
+
+            pairs.forEach(url => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.dataset.url = url;
+                card.innerHTML = `<img src="${url}">`;
+                
+                // Event Listener für sofortige Reaktion
+                card.addEventListener('pointerdown', (e) => {
+                    // Verhindert zusätzliches Scrollen beim Antippen
+                    e.preventDefault(); 
+                    flip(card);
+                });
+                
+                board.appendChild(card);
+                cards.push(card);
+            });
+        }
+        
+        function updateScoreBoard() {
+            const p1 = document.getElementById('score-p1');
+            const p2 = document.getElementById('score-p2');
+            
+            p1.textContent = `Spieler 1: ${scores[1]}`;
+            p2.textContent = `Spieler 2: ${scores[2]}`;
+            
+            if (playerMode === 1) {
+                p2.style.display = 'none';
+                p1.textContent = `Gefundene Paare: ${scores[1]}`;
+                p1.className = 'score-box active';
+                document.getElementById('scoreboard').style.justifyContent = 'center';
+            } else {
+                p2.style.display = 'block';
+                document.getElementById('scoreboard').style.justifyContent = 'space-between';
+                if (currentPlayer === 1) {
+                    p1.className = 'score-box active';
+                    p2.className = 'score-box';
+                } else {
+                    p1.className = 'score-box';
+                    p2.className = 'score-box active';
+                }
+            }
+        }
+
+        function flip(card) {
+            if (flipped.length >= 2 || card.classList.contains('flipped') || card.classList.contains('matched')) return;
+            
+            card.classList.add('flipped');
+            flipped.push(card);
+
+            if (flipped.length === 2) {
+                setTimeout(() => {
+                    if (flipped[0].dataset.url === flipped[1].dataset.url) {
+                        flipped[0].classList.add('matched');
+                        flipped[1].classList.add('matched');
+                        matches++;
+                        scores[currentPlayer]++; 
+                        updateScoreBoard();
+                        
+                        if (matches === cards.length / 2) {
+                            setTimeout(() => {
+                                if (playerMode === 1) {
+                                    showMessage('Glückwunsch! Du hast alle Paare gefunden.');
+                                } else {
+                                    if (scores[1] > scores[2]) showMessage('Klasse! Spieler 1 hat gewonnen!');
+                                    else if (scores[2] > scores[1]) showMessage('Klasse! Spieler 2 hat gewonnen!');
+                                    else showMessage('Unentschieden! Beide sind gleich gut.');
+                                }
+                            }, 300);
+                        }
+                    } else {
+                        flipped[0].classList.remove('flipped');
+                        flipped[1].classList.remove('flipped');
+                        
+                        if (playerMode === 2) {
+                            currentPlayer = currentPlayer === 1 ? 2 : 1;
+                            updateScoreBoard();
+                        }
+                    }
+                    flipped = [];
+                }, 1000);
+            }
+        }
+    </script>
+</body>
+</html>
