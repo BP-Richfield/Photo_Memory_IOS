@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mein Foto-Memory Pro (Speed Edition)</title>
+    <title>Mein Foto-Memory Pro (Feedback Edition)</title>
     <style>
         body { 
             font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
@@ -43,7 +43,6 @@
             outline: none;
             margin: 0;
             box-sizing: border-box;
-            /* Entfernt die 300ms Klick-Verzögerung auf Knöpfen */
             touch-action: manipulation;
         }
         
@@ -99,17 +98,33 @@
             overflow: hidden; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.2); 
             
-            /* PERFORMANCE-BOOST: */
-            touch-action: manipulation; /* Keine 300ms Wartezeit mehr beim Tippen! */
-            -webkit-user-select: none; /* Verhindert versehentliches Markieren */
+            touch-action: manipulation; 
+            -webkit-user-select: none; 
             user-select: none;
-            will-change: transform; /* Hardware-Beschleunigung durch die GPU */
-            transition: transform 0.15s ease-out; /* Schnellere, knackigere Animation */
+            will-change: transform; 
+            transition: transform 0.15s ease-out; 
         }
         .card img { width: 100%; height: 100%; object-fit: cover; display: none; pointer-events: none; }
         .card.flipped img { display: block; }
         .card.flipped { background: white; transform: scale(0.95); box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
-        .card.matched { opacity: 0.7; transform: scale(0.95); }
+        
+        /* VISUELLES FEEDBACK - ANIMATIONEN */
+        
+        /* Bei richtigem Paar (Pop und grünes Leuchten) */
+        @keyframes pop {
+            0% { transform: scale(0.95); box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
+            50% { transform: scale(1.05); box-shadow: 0 0 15px #34c759; border: 3px solid #34c759; }
+            100% { transform: scale(0.95); opacity: 0.7; }
+        }
+        .card.matched { animation: pop 0.5s ease-out forwards; }
+
+        /* Bei falschem Paar (Kopfschütteln und rotes Leuchten) */
+        @keyframes shake {
+            0%, 100% { transform: scale(0.95) translateX(0); box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
+            20%, 60% { transform: scale(0.95) translateX(-6px); box-shadow: 0 0 10px #ff3b30; }
+            40%, 80% { transform: scale(0.95) translateX(6px); box-shadow: 0 0 10px #ff3b30; }
+        }
+        .card.shake { animation: shake 0.5s ease-in-out; }
 
         #game-message {
             display: none;
@@ -181,6 +196,56 @@
         let scores = {1: 0, 2: 0};
         
         let deleteConfirmTimer = null;
+
+        // AUDIO SYSTEM (Komplett autark ohne externe Sound-Dateien)
+        let audioCtx = null;
+        
+        function initAudio() {
+            if (!audioCtx) {
+                // Erstellt die Audio-Engine, sobald der Nutzer das erste Mal auf den Bildschirm tippt
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            
+            // Verhindert Sound-Probleme, wenn das iPad auf Stumm ist (iOS Workaround)
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'match') {
+                // Ein helles, freundliches "Pling" (Klingel)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+                osc.frequency.exponentialRampToValueAtTime(1046.50, audioCtx.currentTime + 0.1); // C6
+                
+                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+                
+            } else if (type === 'mismatch') {
+                // Ein tiefes, dumpfes "Möp"
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+                
+                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.2);
+            }
+        }
 
         window.onload = () => {
             loadDecksFromStorage();
@@ -354,10 +419,9 @@
                 card.dataset.url = url;
                 card.innerHTML = `<img src="${url}">`;
                 
-                // Event Listener für sofortige Reaktion
                 card.addEventListener('pointerdown', (e) => {
-                    // Verhindert zusätzliches Scrollen beim Antippen
                     e.preventDefault(); 
+                    initAudio(); // Audio freischalten beim ersten Tippen
                     flip(card);
                 });
                 
@@ -400,8 +464,12 @@
             if (flipped.length === 2) {
                 setTimeout(() => {
                     if (flipped[0].dataset.url === flipped[1].dataset.url) {
+                        
+                        // ERFOLG: Karten gefunden!
+                        playSound('match');
                         flipped[0].classList.add('matched');
                         flipped[1].classList.add('matched');
+                        
                         matches++;
                         scores[currentPlayer]++; 
                         updateScoreBoard();
@@ -415,19 +483,28 @@
                                     else if (scores[2] > scores[1]) showMessage('Klasse! Spieler 2 hat gewonnen!');
                                     else showMessage('Unentschieden! Beide sind gleich gut.');
                                 }
-                            }, 300);
+                            }, 500);
                         }
                     } else {
-                        flipped[0].classList.remove('flipped');
-                        flipped[1].classList.remove('flipped');
                         
-                        if (playerMode === 2) {
-                            currentPlayer = currentPlayer === 1 ? 2 : 1;
-                            updateScoreBoard();
-                        }
+                        // FEHLER: Falsches Paar!
+                        playSound('mismatch');
+                        flipped[0].classList.add('shake');
+                        flipped[1].classList.add('shake');
+                        
+                        // Nach dem "Kopfschütteln" wieder umdrehen
+                        setTimeout(() => {
+                            flipped[0].classList.remove('flipped', 'shake');
+                            flipped[1].classList.remove('flipped', 'shake');
+                            
+                            if (playerMode === 2) {
+                                currentPlayer = currentPlayer === 1 ? 2 : 1;
+                                updateScoreBoard();
+                            }
+                        }, 800);
                     }
                     flipped = [];
-                }, 1000);
+                }, 600);
             }
         }
     </script>
